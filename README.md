@@ -5,15 +5,19 @@
 
 ## Repository Structure
 
-```text
+```
 vision-guided-search-robot/
 ├── README.md
-├── requirements.txt
-├── main.py                    # Entry-point: selects Scenario 1, 2, or 3, sets parameters and runs
+├── main.py                   # Entry-point: selects Scenario 1, 2 or 3, sets parameters and runs
 └── src/
-    ├── environment.py         # Swift 3D: bounded arena, obstacles, robot mesh and FOV cone
-    ├── robot_controller.py    # THINK: go-to-point, APF obstacle avoidance, open-loop TDT baseline
-    ├── perception.py          # SENSE (Scenarios 2–3): measurement noise and virtual camera FOV
-    ├── simulation.py          # Sense-Think-Act loop, exploration waypoints, and data logging
-    └── analysis.py            # Matplotlib plots and metrics
+    ├── control/
+    │   ├── planner.py        # A* path planning on 2D occupancy grid + LOS pruning
+    │   ├── open_loop.py      # Open-loop turn-drive-turn planner and actuation model
+    │   └── closed_loop.py    # Closed-loop go-to-point + APF obstacle avoidance controller
+    ├── env/
+    │   ├── arena.py          # Arena geometry, obstacle definitions, collision detection and scenario generation
+    │   └── swift_env.py      # Swift 3D visualization manager
+    └── sim/
+        ├── simulation.py     # Open and closed-loop simulation of the robot in the arena, simultaneously
+        └── analysis.py       # Matplotlib plots and metrics
 ```
