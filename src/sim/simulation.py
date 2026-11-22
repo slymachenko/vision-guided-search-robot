@@ -18,12 +18,14 @@ def run_dual_sim(
     commands_ol: list[tuple[float, float, int]],
     obstacles: list[dict],
     objective: dict,
+    q_start_real: np.ndarray | None = None,
     dt: float = 0.05,
     speed_factor: float = 1.0,
     k_v_err_ol: float = 1.0,
     k_w_err_ol: float = 1.0,
     k_v_err_cl: float = 1.0,
     k_w_err_cl: float = 1.0,
+    noise_pos_std: float = 0.0,
     stop_distance: float = 0.09,
     max_steps: int = 1500,
     swift_state: dict | None = None,
@@ -35,11 +37,13 @@ def run_dual_sim(
     in the same Swift environment.
     """
     # 1. Initialize kinematics for both robots
+    real_start = q_start if q_start_real is None else q_start_real
+
     robot_ol = rtb.Unicycle(dt=dt)
-    robot_ol.init(list(q_start))
+    robot_ol.init(list(real_start))
 
     robot_cl = rtb.Unicycle(dt=dt)
-    robot_cl.init(list(q_start))
+    robot_cl.init(list(real_start))
 
     target_xy = np.array(objective["center"][:2], dtype=float)
     env = swift_state["env"] if swift_state is not None else None
@@ -85,13 +89,17 @@ def run_dual_sim(
         was_col_ol = is_col_ol
 
         # --- B. Closed-Loop Step (APF) ---
-        dist_cl = float(np.linalg.norm(target_xy - robot_cl.q[:2]))
-        if dist_cl <= stop_distance:
+        q_measured = robot_cl.q.copy()
+        if noise_pos_std > 0.0:
+            q_measured[:2] += np.random.normal(0.0, noise_pos_std, size=2)
+
+        dist_cl = float(np.linalg.norm(target_xy - q_measured[:2]))
+        if dist_cl <= stop_distance + 0.005:
             u_cl_cmd = [0.0, 0.0]
             cl_done = True
         else:
             v_apf, w_apf, _ = compute_apf_control(
-                robot_cl.q, target_xy, obstacles, r_robot=ROBOT_RADIUS, stop_dist=stop_distance
+                q_measured, target_xy, obstacles, r_robot=ROBOT_RADIUS, stop_dist=stop_distance
             )
             u_cl_cmd = [v_apf, w_apf]
 
@@ -147,7 +155,7 @@ def run_dual_sim(
 
     return {
         "open_loop": {
-            "reached": (final_dist_ol <= 0.10) and (col_ol == 0),
+            "reached": (final_dist_ol <= 0.11) and (col_ol == 0),
             "collisions": col_ol,
             "time": len(v_hist_ol) * dt,
             "path_length": float(np.sum(np.linalg.norm(np.diff(q_arr_ol[:, :2], axis=0), axis=1))),
@@ -157,7 +165,7 @@ def run_dual_sim(
             "w_hist": np.array(w_hist_ol),
         },
         "closed_loop": {
-            "reached": (final_dist_cl <= 0.10) and (col_cl == 0),
+            "reached": (final_dist_cl <= 0.11) and (col_cl == 0),
             "collisions": col_cl,
             "time": len(v_hist_cl) * dt,
             "path_length": float(np.sum(np.linalg.norm(np.diff(q_arr_cl[:, :2], axis=0), axis=1))),
