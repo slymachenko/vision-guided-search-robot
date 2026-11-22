@@ -15,6 +15,7 @@ from src.env.swift_env import (
 from src.control.planner import plan_path
 from src.control.open_loop import plan_open_loop
 from src.sim.simulation import run_dual_sim
+from src.sim.analysis import plot_trajectories_2d, plot_metrics_comparison
 
 # =============================================================================
 # CONFIGURATION
@@ -54,6 +55,7 @@ def main():
                 q_start, obstacles, objective = generate_random_scenario(seed=s)
                 scenarios.append((f"seed_{s}", q_start, obstacles, objective))
 
+        batch_results = []
         for label, q_start, obstacles, objective in scenarios:
             print(f"\n--- Loading {label} ---")
             load_scenario_in_swift(swift_state, obstacles, objective)
@@ -84,6 +86,16 @@ def main():
             res_ol = results["open_loop"]
             res_cl = results["closed_loop"]
 
+            batch_results.append({
+                "label": label,
+                "q_start": q_start,
+                "obstacles": obstacles,
+                "objective": objective,
+                "waypoints": waypoints,
+                "open_loop": res_ol,
+                "closed_loop": res_cl,
+            })
+
             print("\nRESULTS SUMMARY:")
             print(
                 f"  Open-Loop (Orange)  -> Reached: {res_ol['reached']} | "
@@ -97,6 +109,11 @@ def main():
             )
 
             time.sleep(PAUSE_BETWEEN)
+
+        # Batch analysis and plots
+        prefix = f"scenario_{SCENARIO}_" + ("random_batch" if USE_RANDOM else "fixed")
+        plot_trajectories_2d(batch_results, save_path=f"results/plots/{prefix}_trajectories.png")
+        plot_metrics_comparison(batch_results, dt=0.05, save_path=f"results/plots/{prefix}_metrics.png")
 
     except KeyboardInterrupt:
         print("\nSimulation stopped by user.")
