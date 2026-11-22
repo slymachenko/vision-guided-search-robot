@@ -7,10 +7,12 @@ import roboticstoolbox as rtb
 import spatialgeometry as sg
 import spatialmath as sm
 
-from src.control.closed_loop import compute_apf_control
+from src.control.closed_loop import compute_apf_control, ReactiveExplorer
+from src.control.perception import PerceptionMemory
 from src.control.open_loop import actuate
+from src.control.camera import VirtualCamera
 from src.env.arena import check_collision, ROBOT_RADIUS, ROBOT_SIZE
-from src.env.swift_env import update_robot_pose
+from src.env.swift_env import update_robot_pose, update_fov_visual
 
 
 def run_dual_sim(
@@ -155,7 +157,7 @@ def run_dual_sim(
 
     return {
         "open_loop": {
-            "reached": (final_dist_ol <= 0.11) and (col_ol == 0),
+            "reached": (final_dist_ol <= 0.10) and (col_ol == 0),
             "collisions": col_ol,
             "time": len(v_hist_ol) * dt,
             "path_length": float(np.sum(np.linalg.norm(np.diff(q_arr_ol[:, :2], axis=0), axis=1))),
@@ -165,7 +167,7 @@ def run_dual_sim(
             "w_hist": np.array(w_hist_ol),
         },
         "closed_loop": {
-            "reached": (final_dist_cl <= 0.11) and (col_cl == 0),
+            "reached": (final_dist_cl <= 0.10) and (col_cl == 0),
             "collisions": col_cl,
             "time": len(v_hist_cl) * dt,
             "path_length": float(np.sum(np.linalg.norm(np.diff(q_arr_cl[:, :2], axis=0), axis=1))),
@@ -174,4 +176,124 @@ def run_dual_sim(
             "v_hist": np.array(v_hist_cl),
             "w_hist": np.array(w_hist_cl),
         },
+    }
+
+
+def run_scenario3_sim(
+    q_start: np.ndarray,
+    obstacles: list[dict],
+    objective: dict,
+    camera: VirtualCamera,
+    dt: float = 0.05,
+    speed_factor: float = 1.0,
+    max_steps: int = 1500,
+    swift_state: dict | None = None,
+    robot_vis: sg.Cuboid | None = None,
+    fov_vis: tuple | None = None,
+) -> dict:
+    """
+    Scenario 3 simulation loop with limited perception memory and reactive exploration:
+    - Working memory with decay for obstacle perception.
+    - Reactive forward drive with in-place FOV scans.
+    - Locks onto target when in FOV and approaches safely.
+    """
+
+    robot = rtb.Unicycle(dt=dt)
+    robot.init(list(q_start))
+
+    target_xy = np.array(objective["center"][:2], dtype=float)
+    env = swift_state["env"] if swift_state is not None else None
+
+    # Working memory: senses obstacles up to 0.75m, forgets after 4.0s
+    memory = PerceptionMemory(sensor_range=0.75, decay_time=4.0)
+    explorer = ReactiveExplorer(dt=dt)
+
+    q_hist = [robot.q.copy()]
+    v_hist, w_hist, dist_hist = [], [], []
+    collisions = 0
+    was_colliding = False
+
+    target_detected = False
+    step_detected = None
+
+    render_stride = max(1, int(round(speed_factor / 2.0)))
+    vis_dt = (dt * render_stride) / max(speed_factor, 1e-3)
+    fov_markers, fov_local_pts = fov_vis if fov_vis is not None else (None, None)
+
+    for step in range(max_steps):
+        current_time = step * dt
+        dist_to_target = float(np.linalg.norm(target_xy - robot.q[:2]))
+        dist_hist.append(dist_to_target)
+
+        # 1. Update working memory (perceive obstacles within sensor range)
+        known_obstacles = memory.update(robot.q, obstacles, current_time)
+
+        # 2. Camera detection check
+        if not target_detected:
+            if camera.is_target_visible(robot.q, target_xy, obstacles):
+                target_detected = True
+                step_detected = step
+                print(f"-> [TARGET DETECTED!] at step {step} ({current_time:.2f}s). Switching to approaching mode.")
+
+        # 3. Control logic
+        if not target_detected:
+            # Phase 1: Local reactive wander with in-place scans
+            v, w = explorer.compute_step(robot.q, known_obstacles)
+        else:
+            # Phase 2: Target approaching via APF using perceived obstacles
+            if dist_to_target <= 0.085:
+                v, w = 0.0, 0.0
+                v_hist.append(v)
+                w_hist.append(w)
+                break
+            v, w, _ = compute_apf_control(robot.q, target_xy, known_obstacles, stop_dist=0.08)
+
+        v_hist.append(v)
+        w_hist.append(w)
+        robot.step(np.array([v, w]))
+        q_hist.append(robot.q.copy())
+
+        # Physical collision check against the actual world
+        is_col = check_collision(robot.q, obstacles, objective, ROBOT_SIZE)
+        if is_col and not was_colliding:
+            collisions += 1
+        was_colliding = is_col
+
+        # Swift visual updates
+        if env is not None:
+            if step % 6 == 0:
+                crumb_color = (0.2, 0.5, 0.9, 0.6) if target_detected else (0.1, 0.8, 0.3, 0.5)
+                crumb = sg.Sphere(radius=0.007, pose=sm.SE3(robot.q[0], robot.q[1], 0.007), color=crumb_color)
+                swift_state["dynamic_handles"].append(env.add(crumb))
+
+            if step % render_stride == 0:
+                if robot_vis is not None:
+                    update_robot_pose(robot_vis, robot.q, ROBOT_SIZE)
+                if fov_markers is not None:
+                    update_fov_visual(fov_markers, fov_local_pts, robot.q)
+                env.step(vis_dt)
+
+    # Final visual refresh
+    if env is not None and robot_vis is not None:
+        update_robot_pose(robot_vis, robot.q, ROBOT_SIZE)
+        if fov_markers is not None:
+            update_fov_visual(fov_markers, fov_local_pts, robot.q)
+        env.step(0.0)
+
+    final_dist = float(np.linalg.norm(target_xy - robot.q[:2]))
+    q_arr = np.array(q_hist)
+
+    return {
+        "reached": (final_dist <= 0.10) and (collisions == 0) and target_detected,
+        "target_detected": target_detected,
+        "step_detected": step_detected,
+        "time_detected": (step_detected * dt) if step_detected is not None else None,
+        "collisions": collisions,
+        "time": len(v_hist) * dt,
+        "path_length": float(np.sum(np.linalg.norm(np.diff(q_arr[:, :2], axis=0), axis=1))),
+        "final_distance": final_dist,
+        "q_hist": q_arr,
+        "v_hist": np.array(v_hist),
+        "w_hist": np.array(w_hist),
+        "dist_hist": np.array(dist_hist),
     }

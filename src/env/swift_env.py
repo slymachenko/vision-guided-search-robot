@@ -11,6 +11,7 @@ import time
 import logging
 
 from src.env.arena import DEFAULT_WALLS, ROBOT_SIZE
+from src.control.camera import VirtualCamera
 
 
 def init_swift(
@@ -119,3 +120,34 @@ def update_robot_pose(
     lz = robot_size[2]
     # Place robot bottom flush on the ground (z = lz / 2)
     robot_shape.T = sm.SE3(x, y, lz / 2.0) * sm.SE3.Rz(theta)
+
+
+def create_fov_visual(
+    env: swift.Swift,
+    camera: VirtualCamera,
+    color: tuple[float, float, float, float] = (0.1, 0.9, 0.2, 0.75),  # Semi-transparent green
+) -> tuple[list, list[tuple[float, float]]]:
+    """
+    Create visual boundary spheres on the floor for the camera FOV circular sector.
+    Returns (markers_list, local_relative_points).
+    """
+    local_pts = camera.get_fov_local_points(n_arc_points=9)
+    markers = []
+
+    for _ in local_pts:
+        marker = sg.Sphere(radius=0.007, color=color)
+        env.add(marker)
+        markers.append(marker)
+
+    return markers, local_pts
+
+
+def update_fov_visual(fov_markers: list, local_pts: list[tuple[float, float]], q_robot: np.ndarray) -> None:
+    """Update 3D world pose of all FOV sector boundary markers."""
+    rx, ry, r_theta = q_robot
+    c, s = np.cos(r_theta), np.sin(r_theta)
+    rot = np.array([[c, -s], [s, c]])
+
+    for marker, (lx, ly) in zip(fov_markers, local_pts):
+        world_pt = rot @ np.array([lx, ly]) + np.array([rx, ry])
+        marker.T = sm.SE3(world_pt[0], world_pt[1], 0.005)  # Slightly above floor
