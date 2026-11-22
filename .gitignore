@@ -1,2 +1,7 @@
 
 docs/*.pdf
+results/plots/*.png
+
+__pycache__/
+
+.vscode
