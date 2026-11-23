@@ -13,7 +13,9 @@ vision-guided-search-robot/
     ├── control/
     │   ├── planner.py        # A* path planning on 2D occupancy grid + LOS pruning
     │   ├── open_loop.py      # Open-loop turn-drive-turn planner and actuation model
-    │   └── closed_loop.py    # Closed-loop go-to-point + APF obstacle avoidance controller
+    │   ├── closed_loop.py    # Closed-loop go-to-point + APF obstacle avoidance controller
+    │   ├── perception.py     # Perception module
+    │   └── camera.py         # Virtual camera sensor: FOV
     ├── env/
     │   ├── arena.py          # Arena geometry, obstacle definitions, collision detection and scenario generation
     │   └── swift_env.py      # Swift 3D visualization manager
