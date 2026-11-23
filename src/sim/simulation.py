@@ -12,7 +12,7 @@ from src.control.perception import PerceptionMemory
 from src.control.open_loop import actuate
 from src.control.camera import VirtualCamera
 from src.env.arena import check_collision, ROBOT_RADIUS, ROBOT_SIZE
-from src.env.swift_env import update_robot_pose, update_fov_visual
+from src.env.swift_env import update_robot_pose, update_fov_visual, update_swift_camera, reset_default_camera
 
 
 def run_dual_sim(
@@ -184,6 +184,7 @@ def run_scenario3_sim(
     obstacles: list[dict],
     objective: dict,
     camera: VirtualCamera,
+    swift_camera_mode: str = "default",
     dt: float = 0.05,
     speed_factor: float = 1.0,
     max_steps: int = 1500,
@@ -204,8 +205,7 @@ def run_scenario3_sim(
     target_xy = np.array(objective["center"][:2], dtype=float)
     env = swift_state["env"] if swift_state is not None else None
 
-    # Working memory: senses obstacles up to 0.75m, forgets after 4.0s
-    memory = PerceptionMemory(sensor_range=0.75, decay_time=4.0)
+    memory = PerceptionMemory(camera=camera, decay_time=4.0)
     explorer = ReactiveExplorer(dt=dt)
 
     q_hist = [robot.q.copy()]
@@ -219,6 +219,13 @@ def run_scenario3_sim(
     render_stride = max(1, int(round(speed_factor / 2.0)))
     vis_dt = (dt * render_stride) / max(speed_factor, 1e-3)
     fov_markers, fov_local_pts = fov_vis if fov_vis is not None else (None, None)
+
+    if env is not None:
+        if swift_camera_mode != "default":
+            update_swift_camera(env, q_start, mode=swift_camera_mode)
+        else:
+            reset_default_camera(env)
+        env.step(0.0)
 
     for step in range(max_steps):
         current_time = step * dt
@@ -271,6 +278,8 @@ def run_scenario3_sim(
                     update_robot_pose(robot_vis, robot.q, ROBOT_SIZE)
                 if fov_markers is not None:
                     update_fov_visual(fov_markers, fov_local_pts, robot.q)
+                if swift_camera_mode != "default":
+                    update_swift_camera(env, robot.q, mode=swift_camera_mode)
                 env.step(vis_dt)
 
     # Final visual refresh
@@ -278,6 +287,8 @@ def run_scenario3_sim(
         update_robot_pose(robot_vis, robot.q, ROBOT_SIZE)
         if fov_markers is not None:
             update_fov_visual(fov_markers, fov_local_pts, robot.q)
+        if swift_camera_mode != "default":
+            update_swift_camera(env, robot.q, mode=swift_camera_mode)
         env.step(0.0)
 
     final_dist = float(np.linalg.norm(target_xy - robot.q[:2]))

@@ -151,3 +151,39 @@ def update_fov_visual(fov_markers: list, local_pts: list[tuple[float, float]], q
     for marker, (lx, ly) in zip(fov_markers, local_pts):
         world_pt = rot @ np.array([lx, ly]) + np.array([rx, ry])
         marker.T = sm.SE3(world_pt[0], world_pt[1], 0.005)  # Slightly above floor
+
+
+def update_swift_camera(env: swift.Swift, q: np.ndarray, mode: str = "default") -> None:
+    """
+    Dynamically update Swift camera pose based on robot pose (x, y, theta):
+    - 'default': Overview from above (static, no-op).
+    - 'first_person': Camera mounted on robot's nose, looking in travel direction.
+    - 'third_person': Camera placed behind and above, tracking robot smoothly.
+    """
+    if mode == "default":
+        return
+
+    x, y, theta = q
+    c, s = np.cos(theta), np.sin(theta)
+
+    if mode == "first_person":
+        # Mounted on nose (lx/2 = 0.05m), looking forward into the FOV cone
+        cam_pos = [float(x + 0.055 * c), float(y + 0.055 * s), 0.065]
+        look_at = [float(x + 0.55 * c), float(y + 0.55 * s), 0.030]
+        env.set_camera_pose(cam_pos, look_at)
+
+    elif mode == "third_person":
+        # Set back ~35 cm behind heading, elevated ~20 cm
+        cam_pos = [float(x - 0.35 * c), float(y - 0.35 * s), 0.22]
+        look_at = [float(x + 0.25 * c), float(y + 0.25 * s), 0.04]
+        env.set_camera_pose(cam_pos, look_at)
+
+
+def reset_default_camera(env: swift.Swift) -> None:
+    """Reset camera to the standard 60-degree high-angle arena overview."""
+    arena_center = np.array([1.0, 1.0, 0.0])
+    cam_z = 2.0
+    tilt_rad = np.deg2rad(60.0)
+    dy = cam_z / np.tan(tilt_rad)
+    cam_pos = [arena_center[0], arena_center[1] - dy, cam_z]
+    env.set_camera_pose(cam_pos, arena_center.tolist())

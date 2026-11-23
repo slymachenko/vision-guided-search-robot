@@ -26,11 +26,12 @@ from src.sim.analysis import plot_trajectories_2d, plot_metrics_comparison
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-SCENARIO = 3              # 1: Ideal | 2: Disturbances/Noise | 3: Vision Search
-USE_RANDOM = False        # False: fixed arena | True: random seeds
-N_SEEDS = 5               # Trials to run if USE_RANDOM is True
-SPEED_FACTOR = 3.0        # Swift visual speedup (1.0 = real-time, 2.0 = 2x speed)
-PAUSE_BETWEEN = 2.0       # Seconds to observe final pose between worlds
+SCENARIO = 3                  # 1: Ideal | 2: Disturbances/Noise | 3: Vision Search
+USE_RANDOM = True             # False: fixed arena | True: random seeds
+N_SEEDS = 5                   # Trials to run if USE_RANDOM is True
+SPEED_FACTOR = 3.0            # Swift visual speedup (1.0 = real-time, 2.0 = 2x speed)
+PAUSE_BETWEEN = 2.0           # Seconds to observe final pose between worlds
+CAMERA_MODE = "default"       # (only for Scenario 3) "default" | "first_person" | "third_person"
 
 
 def main():
@@ -155,6 +156,7 @@ def main():
                     obstacles=obstacles,
                     objective=objective,
                     camera=camera,
+                    swift_camera_mode=CAMERA_MODE,
                     speed_factor=SPEED_FACTOR,
                     swift_state=swift_state,
                     robot_vis=robot_vis,
