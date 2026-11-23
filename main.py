@@ -29,7 +29,8 @@ from src.sim.analysis import plot_trajectories_2d, plot_metrics_comparison
 SCENARIO = 3                  # 1: Ideal | 2: Disturbances/Noise | 3: Vision Search
 USE_RANDOM = True             # False: fixed arena | True: random seeds
 N_SEEDS = 5                   # Trials to run if USE_RANDOM is True
-SPEED_FACTOR = 3.0            # Swift visual speedup (1.0 = real-time, 2.0 = 2x speed)
+START_SEED = 0                # Starting seed for random scenarios
+SPEED_FACTOR = 10.0           # Swift visual speedup (1.0 = real-time, 2.0 = 2x speed)
 PAUSE_BETWEEN = 2.0           # Seconds to observe final pose between worlds
 CAMERA_MODE = "default"       # (only for Scenario 3) "default" | "first_person" | "third_person"
 
@@ -47,7 +48,7 @@ def main():
             q_start, obstacles, objective = get_fixed_scenario()
             scenarios.append(("fixed", q_start, obstacles, objective))
         else:
-            for s in range(N_SEEDS):
+            for s in range(START_SEED, START_SEED + N_SEEDS):
                 q_start, obstacles, objective = generate_random_scenario(seed=s)
                 scenarios.append((f"seed_{s}", q_start, obstacles, objective))
 
