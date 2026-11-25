@@ -1,62 +1,52 @@
 """
-Perception module with decaying working memory for detected obstacles.
-Only obstacles currently visible within the camera FOV are perceived and remembered.
+Perception module for Scenario 3.
+Updates the incremental ExplorationGrid from robot traversal and VirtualCamera FOV,
+and checks whether the target is visible inside the camera cone.
 """
 
 import numpy as np
 from src.control.camera import VirtualCamera
+from src.control.exploration_grid import ExplorationGrid
 
 
 class PerceptionMemory:
     """
-    Local working memory for perceived obstacles with temporal decay.
-    Only obstacles entering the camera's FOV are perceived.
-    Obstacles not refreshed within decay_time are forgotten.
+    Persistent spatial perception using ExplorationGrid and VirtualCamera.
+    Replaces short-term forgetting with incremental FREE / OCCUPIED / UNKNOWN mapping.
     """
 
     def __init__(
         self,
         camera: VirtualCamera,
-        decay_time: float = 4.0,  # Seconds an obstacle is remembered after leaving FOV
+        grid: ExplorationGrid | None = None,
     ):
         self.camera = camera
-        self.decay_time = decay_time
-        # Dictionary storing: {obs_id: {"obstacle": obs_dict, "last_seen": float}}
-        self._memory: dict[int, dict] = {}
+        self.grid = grid if grid is not None else ExplorationGrid()
+        self.target_detected = False
+        self.target_pos: np.ndarray | None = None
 
     def update(
         self,
         q_robot: np.ndarray,
         all_obstacles: list[dict],
-        current_time: float,
-    ) -> list[dict]:
+        target_xy: tuple[float, float] | np.ndarray | None = None,
+    ) -> tuple[ExplorationGrid, bool]:
         """
-        Scan environment from current robot pose using the camera FOV.
-        Adds newly perceived obstacles and discards expired ones.
+        Sense the environment from current pose:
+        1. Update ExplorationGrid with traversed footprint and camera FOV rays.
+        2. Check target visibility within the FOV cone.
         """
-        # 1. Perception check: only obstacles visible in the camera FOV (not occluded)
-        for idx, obs in enumerate(all_obstacles):
-            if self.camera.is_obstacle_visible(q_robot, obs, all_obstacles):
-                # Obstacle is within the green FOV cone: refresh memory
-                self._memory[idx] = {
-                    "obstacle": obs,
-                    "last_seen": current_time,
-                }
+        self.grid.update(q_robot, all_obstacles, self.camera)
 
-        # 2. Decay check: forget obstacles not seen recently
-        expired_keys = [
-            k for k, item in self._memory.items()
-            if (current_time - item["last_seen"]) > self.decay_time
-        ]
-        for k in expired_keys:
-            del self._memory[k]
+        if target_xy is not None and not self.target_detected:
+            if self.camera.is_target_visible(q_robot, target_xy, all_obstacles):
+                self.target_detected = True
+                self.target_pos = np.asarray(target_xy[:2], dtype=float)
 
-        return self.get_known_obstacles()
-
-    def get_known_obstacles(self) -> list[dict]:
-        """Return the list of obstacles currently present in working memory."""
-        return [item["obstacle"] for item in self._memory.values()]
+        return self.grid, self.target_detected
 
     def reset(self) -> None:
-        """Clear memory at the start of a new scenario."""
-        self._memory.clear()
+        """Clear grid and detection state at the start of a new scenario."""
+        self.grid.reset()
+        self.target_detected = False
+        self.target_pos = None

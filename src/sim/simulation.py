@@ -8,11 +8,19 @@ import spatialgeometry as sg
 import spatialmath as sm
 
 from src.control.closed_loop import compute_apf_control, ReactiveExplorer
+from src.control.exploration_grid import ExplorationGrid
 from src.control.perception import PerceptionMemory
 from src.control.open_loop import actuate
 from src.control.camera import VirtualCamera
 from src.env.arena import check_collision, ROBOT_RADIUS, ROBOT_SIZE
-from src.env.swift_env import update_robot_pose, update_fov_visual, update_swift_camera, reset_default_camera
+from src.env.swift_env import (
+    update_robot_pose,
+    update_fov_visual,
+    update_swift_camera,
+    reset_default_camera,
+    create_grid_visual,
+    update_grid_visual,
+)
 
 
 def run_dual_sim(
@@ -185,6 +193,7 @@ def run_scenario3_sim(
     objective: dict,
     camera: VirtualCamera,
     swift_camera_mode: str = "default",
+    show_grid_vis: bool = True,
     dt: float = 0.05,
     speed_factor: float = 1.0,
     max_steps: int = 1500,
@@ -193,10 +202,10 @@ def run_scenario3_sim(
     fov_vis: tuple | None = None,
 ) -> dict:
     """
-    Scenario 3 simulation loop with limited perception memory and reactive exploration:
-    - Working memory with decay for obstacle perception.
-    - Reactive forward drive with in-place FOV scans.
-    - Locks onto target when in FOV and approaches safely.
+    Scenario 3 simulation loop with incremental ExplorationGrid and FOV-based search:
+    - Maps traversed FREE, visible FREE, visible OCCUPIED, and UNKNOWN cells dynamically.
+    - Explores UNKNOWN frontiers via A* + local APF repulsion.
+    - Locks onto target when visible in FOV and approaches safely.
     """
 
     robot = rtb.Unicycle(dt=dt)
@@ -205,8 +214,9 @@ def run_scenario3_sim(
     target_xy = np.array(objective["center"][:2], dtype=float)
     env = swift_state["env"] if swift_state is not None else None
 
-    memory = PerceptionMemory(camera=camera, decay_time=4.0)
-    explorer = ReactiveExplorer(dt=dt)
+    grid = ExplorationGrid()
+    memory = PerceptionMemory(camera=camera, grid=grid)
+    explorer = ReactiveExplorer(fov_angle=camera.fov_angle, dt=dt)
 
     q_hist = [robot.q.copy()]
     v_hist, w_hist, dist_hist = [], [], []
@@ -215,12 +225,16 @@ def run_scenario3_sim(
 
     target_detected = False
     step_detected = None
+    q_detected = None
 
     render_stride = max(1, int(round(speed_factor / 2.0)))
     vis_dt = (dt * render_stride) / max(speed_factor, 1e-3)
     fov_markers, fov_local_pts = fov_vis if fov_vis is not None else (None, None)
+    grid_vis = create_grid_visual() if (env is not None and show_grid_vis) else None
 
     if env is not None:
+        if fov_markers is not None:
+            update_fov_visual(fov_markers, fov_local_pts, q_start)
         if swift_camera_mode != "default":
             update_swift_camera(env, q_start, mode=swift_camera_mode)
         else:
@@ -232,29 +246,21 @@ def run_scenario3_sim(
         dist_to_target = float(np.linalg.norm(target_xy - robot.q[:2]))
         dist_hist.append(dist_to_target)
 
-        # 1. Update working memory (perceive obstacles within sensor range)
-        known_obstacles = memory.update(robot.q, obstacles, current_time)
+        # 1. Sense: update ExplorationGrid (footprint + FOV) and check target visibility
+        was_detected = target_detected
+        _, target_detected = memory.update(robot.q, obstacles, target_xy)
+        if target_detected and not was_detected:
+            step_detected = step
+            q_detected = robot.q.copy()
+            print(f"-> [TARGET DETECTED!] at step {step} ({current_time:.2f}s). Switching to approaching mode.")
 
-        # 2. Camera detection check
-        if not target_detected:
-            if camera.is_target_visible(robot.q, target_xy, obstacles):
-                target_detected = True
-                step_detected = step
-                print(f"-> [TARGET DETECTED!] at step {step} ({current_time:.2f}s). Switching to approaching mode.")
+        # 2. Think: check completion or compute velocity commands
+        if target_detected and dist_to_target <= 0.085:
+            break
 
-        # 3. Control logic
-        if not target_detected:
-            # Phase 1: Local reactive wander with in-place scans
-            v, w = explorer.compute_step(robot.q, known_obstacles)
-        else:
-            # Phase 2: Target approaching via APF using perceived obstacles
-            if dist_to_target <= 0.085:
-                v, w = 0.0, 0.0
-                v_hist.append(v)
-                w_hist.append(w)
-                break
-            v, w, _ = compute_apf_control(robot.q, target_xy, known_obstacles, stop_dist=0.08)
+        v, w = explorer.compute_step(robot.q, grid, target_xy if target_detected else None)
 
+        # 3. Act: apply unicycle motion
         v_hist.append(v)
         w_hist.append(w)
         robot.step(np.array([v, w]))
@@ -278,6 +284,8 @@ def run_scenario3_sim(
                     update_robot_pose(robot_vis, robot.q, ROBOT_SIZE)
                 if fov_markers is not None:
                     update_fov_visual(fov_markers, fov_local_pts, robot.q)
+                if grid_vis is not None:
+                    update_grid_visual(env, swift_state, grid, grid_vis)
                 if swift_camera_mode != "default":
                     update_swift_camera(env, robot.q, mode=swift_camera_mode)
                 env.step(vis_dt)
@@ -287,6 +295,8 @@ def run_scenario3_sim(
         update_robot_pose(robot_vis, robot.q, ROBOT_SIZE)
         if fov_markers is not None:
             update_fov_visual(fov_markers, fov_local_pts, robot.q)
+        if grid_vis is not None:
+            update_grid_visual(env, swift_state, grid, grid_vis)
         if swift_camera_mode != "default":
             update_swift_camera(env, robot.q, mode=swift_camera_mode)
         env.step(0.0)
@@ -299,6 +309,7 @@ def run_scenario3_sim(
         "target_detected": target_detected,
         "step_detected": step_detected,
         "time_detected": (step_detected * dt) if step_detected is not None else None,
+        "q_detected": q_detected,
         "collisions": collisions,
         "time": len(v_hist) * dt,
         "path_length": float(np.sum(np.linalg.norm(np.diff(q_arr[:, :2], axis=0), axis=1))),
@@ -307,4 +318,6 @@ def run_scenario3_sim(
         "v_hist": np.array(v_hist),
         "w_hist": np.array(w_hist),
         "dist_hist": np.array(dist_hist),
+        "grid": grid,
+        "mapped_areas": grid.get_mapped_areas(),
     }

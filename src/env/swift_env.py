@@ -187,3 +187,50 @@ def reset_default_camera(env: swift.Swift) -> None:
     dy = cam_z / np.tan(tilt_rad)
     cam_pos = [arena_center[0], arena_center[1] - dy, cam_z]
     env.set_camera_pose(cam_pos, arena_center.tolist())
+
+
+def create_grid_visual(vis_res: float = 0.10) -> dict:
+    """Create lightweight state tracker for coarse floor visualization of ExplorationGrid."""
+    return {"res": float(vis_res), "free_tiles": set(), "occ_tiles": set()}
+
+
+def update_grid_visual(env: swift.Swift, swift_state: dict, exp_grid, vis_state: dict) -> None:
+    """
+    Incrementally render mapped FREE and OCCUPIED cells onto the Swift floor using
+    coarse dynamic tiles (independent of arena size) without removing existing tiles.
+    """
+    if exp_grid.width == 0:
+        return
+
+    vis_res = vis_state["res"]
+    fine_res = exp_grid.res
+
+    # 1. FREE tiles (value == 1)
+    fr_rows, fr_cols = np.where(exp_grid.grid == 1)
+    if len(fr_rows) > 0:
+        f_vx = np.floor((exp_grid.x_min + (fr_cols + 0.5) * fine_res) / vis_res).astype(int)
+        f_vy = np.floor((exp_grid.y_min + (fr_rows + 0.5) * fine_res) / vis_res).astype(int)
+        for vx, vy in set(zip(f_vx.tolist(), f_vy.tolist())):
+            if (vx, vy) not in vis_state["free_tiles"]:
+                tile = sg.Cuboid(
+                    scale=[vis_res * 0.92, vis_res * 0.92, 0.002],
+                    color=(0.45, 0.85, 0.55, 0.30),
+                )
+                tile.T = sm.SE3((vx + 0.5) * vis_res, (vy + 0.5) * vis_res, 0.001)
+                swift_state["dynamic_handles"].append(env.add(tile))
+                vis_state["free_tiles"].add((vx, vy))
+
+    # 2. OCCUPIED tiles (value == 2)
+    oc_rows, oc_cols = np.where(exp_grid.grid == 2)
+    if len(oc_rows) > 0:
+        o_vx = np.floor((exp_grid.x_min + (oc_cols + 0.5) * fine_res) / vis_res).astype(int)
+        o_vy = np.floor((exp_grid.y_min + (oc_rows + 0.5) * fine_res) / vis_res).astype(int)
+        for vx, vy in set(zip(o_vx.tolist(), o_vy.tolist())):
+            if (vx, vy) not in vis_state["occ_tiles"]:
+                tile = sg.Cuboid(
+                    scale=[vis_res * 0.92, vis_res * 0.92, 0.004],
+                    color=(0.95, 0.30, 0.15, 0.75),
+                )
+                tile.T = sm.SE3((vx + 0.5) * vis_res, (vy + 0.5) * vis_res, 0.003)
+                swift_state["dynamic_handles"].append(env.add(tile))
+                vis_state["occ_tiles"].add((vx, vy))

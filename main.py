@@ -21,7 +21,12 @@ from src.control.planner import plan_path
 from src.control.open_loop import plan_open_loop
 from src.control.camera import VirtualCamera
 from src.sim.simulation import run_dual_sim, run_scenario3_sim
-from src.sim.analysis import plot_trajectories_2d, plot_metrics_comparison
+from src.sim.analysis import (
+    plot_trajectories_2d,
+    plot_metrics_comparison,
+    plot_scenario3_maps,
+    plot_scenario3_metrics,
+)
 
 # =============================================================================
 # CONFIGURATION
@@ -30,9 +35,10 @@ SCENARIO = 3                  # 1: Ideal | 2: Disturbances/Noise | 3: Vision Sea
 USE_RANDOM = True             # False: fixed arena | True: random seeds
 N_SEEDS = 5                   # Trials to run if USE_RANDOM is True
 START_SEED = 0                # Starting seed for random scenarios
-SPEED_FACTOR = 10.0           # Swift visual speedup (1.0 = real-time, 2.0 = 2x speed)
+SPEED_FACTOR = 3.0            # Swift visual speedup (1.0 = real-time, 2.0 = 2x speed)
 PAUSE_BETWEEN = 2.0           # Seconds to observe final pose between worlds
 CAMERA_MODE = "default"       # (only for Scenario 3) "default" | "first_person" | "third_person"
+SHOW_GRID_VIS = True          # (only for Scenario 3) Render explored FREE/OCCUPIED tiles in Swift
 
 
 def main():
@@ -138,9 +144,10 @@ def main():
         # =====================================================================
         elif SCENARIO == 3:
             # Single robot with virtual camera
-            camera = VirtualCamera(fov_angle=np.deg2rad(70.0), max_range=0.85)
+            camera = VirtualCamera(fov_angle=np.deg2rad(70.0), max_range=0.85, false_negative_prob=0.0)
             robot_vis = create_robot_marker(env, color=(0.2, 0.5, 0.9, 1.0))
 
+            batch_results = []
             for label, q_start, obstacles, objective in scenarios:
                 print(f"\n--- Loading {label} (Scenario 3: Vision Search) ---")
                 load_scenario_in_swift(swift_state, obstacles, objective)
@@ -158,21 +165,37 @@ def main():
                     objective=objective,
                     camera=camera,
                     swift_camera_mode=CAMERA_MODE,
+                    show_grid_vis=SHOW_GRID_VIS,
                     speed_factor=SPEED_FACTOR,
                     swift_state=swift_state,
                     robot_vis=robot_vis,
                     fov_vis=(fov_handles, fov_pts),
                 )
 
+                batch_results.append({
+                    "label": label,
+                    "q_start": q_start,
+                    "obstacles": obstacles,
+                    "objective": objective,
+                    "result": res,
+                })
+
                 time_det_str = f"{res['time_detected']:.1f}s" if res['time_detected'] is not None else "Never"
+                areas = res["mapped_areas"]
                 print("\nSCENARIO 3 RESULTS:")
                 print(
                     f"  Robot (Blue) -> Reached: {res['reached']} | Detected: {res['target_detected']} "
                     f"(at {time_det_str}) | Collisions: {res['collisions']} | "
-                    f"Time: {res['time']:.1f}s | Path: {res['path_length']:.2f}m | Final Dist: {res['final_distance']:.4f}m"
+                    f"Time: {res['time']:.1f}s | Path: {res['path_length']:.2f}m | "
+                    f"Final Dist: {res['final_distance']:.4f}m | "
+                    f"Mapped Free: {areas['free_m2']:.2f}m² | Occ: {areas['occupied_m2']:.2f}m²"
                 )
 
                 time.sleep(PAUSE_BETWEEN)
+
+            prefix = "scenario_3_" + ("random_batch" if USE_RANDOM else "fixed")
+            plot_scenario3_maps(batch_results, save_path=f"results/plots/{prefix}_maps.png")
+            plot_scenario3_metrics(batch_results, dt=0.05, save_path=f"results/plots/{prefix}_metrics.png")
 
     except KeyboardInterrupt:
         print("\nSimulation stopped by user.")

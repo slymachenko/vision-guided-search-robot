@@ -5,7 +5,8 @@ Generates 2D arena reconstructions and comparative metric charts in results/plot
 
 import os
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle, Polygon
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Circle, Patch, Polygon
 import numpy as np
 
 
@@ -177,3 +178,136 @@ def plot_metrics_comparison(batch_results: list[dict], dt: float = 0.05, save_pa
     fig.savefig(save_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved metrics summary plot: {save_path}")
+
+
+def plot_scenario3_maps(batch_results: list[dict], save_path: str = "results/plots/scenario_3_maps.png") -> None:
+    """
+    Plot 2D ExplorationGrid maps (UNKNOWN / FREE / traversed / OCCUPIED) overlaid with
+    real obstacles, exploration/approach trajectory, and target detection pose.
+    """
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    n = len(batch_results)
+    cols = min(3, n)
+    rows = int(np.ceil(n / cols))
+
+    fig, axes = plt.subplots(rows, cols, figsize=(4.8 * cols, 4.8 * rows))
+    axes = np.atleast_1d(axes).ravel()
+    grid_cmap = ListedColormap(["#dcdcdc", "#eef9ee", "#c0392b"])  # UNKNOWN, FREE, OCCUPIED
+
+    for idx, item in enumerate(batch_results):
+        ax = axes[idx]
+        res = item["result"]
+        grid = res["grid"]
+        q_hist = res["q_hist"]
+        step_det = res["step_detected"]
+
+        if grid.width > 0:
+            extent = [grid.x_min, grid.x_max, grid.y_min, grid.y_max]
+            ax.imshow(grid.grid, origin="lower", extent=extent, cmap=grid_cmap, vmin=0, vmax=2, interpolation="nearest")
+            trav_overlay = np.ma.masked_where(~grid.traversed, np.ones_like(grid.grid))
+            ax.imshow(trav_overlay, origin="lower", extent=extent, cmap=ListedColormap(["#b7e4c7"]), alpha=0.75, interpolation="nearest")
+
+        # Draw ground-truth arena layout semi-transparently for map accuracy comparison
+        draw_arena_2d(ax, item["obstacles"], item["objective"], item["q_start"])
+
+        if step_det is not None and step_det < len(q_hist):
+            ax.plot(q_hist[:step_det + 1, 0], q_hist[:step_det + 1, 1], color="tab:green", lw=1.8, label="Explore")
+            ax.plot(q_hist[step_det:, 0], q_hist[step_det:, 1], color="tab:blue", lw=1.8, label="Approach")
+            ax.plot(q_hist[step_det, 0], q_hist[step_det, 1], "gD", markersize=6, zorder=7, label="Detected")
+        else:
+            ax.plot(q_hist[:, 0], q_hist[:, 1], color="tab:green", lw=1.8, label="Explore")
+
+        label = item.get("label", f"Trial {idx}")
+        status = "OK" if res["reached"] else "FAIL"
+        det_str = f"{res['time_detected']:.1f}s" if res["time_detected"] is not None else "Never"
+        areas = res["mapped_areas"]
+        ax.set_title(f"[{label}] {status} | Det: {det_str} | Free: {areas['free_m2']:.2f}m²", fontsize=8.5)
+        ax.set_aspect("equal")
+        xs = [obs["center"][0] for obs in item["obstacles"]] + [float(q_hist[:, 0].min()), float(q_hist[:, 0].max())]
+        ys = [obs["center"][1] for obs in item["obstacles"]] + [float(q_hist[:, 1].min()), float(q_hist[:, 1].max())]
+        ax.set_xlim(min(xs) - 0.05, max(xs) + 0.05)
+        ax.set_ylim(min(ys) - 0.05, max(ys) + 0.05)
+        ax.grid(True, color="0.85", linestyle=":")
+
+        if idx == 0:
+            legend_items = [
+                Patch(facecolor="#dcdcdc", label="Unknown"),
+                Patch(facecolor="#eef9ee", label="Free (FOV)"),
+                Patch(facecolor="#b7e4c7", label="Free (Passed)"),
+                Patch(facecolor="#c0392b", label="Occupied"),
+            ]
+            handles, _ = ax.get_legend_handles_labels()
+            ax.legend(handles=legend_items + handles, loc="upper left", fontsize=6.5, ncol=2)
+
+    for idx in range(n, len(axes)):
+        axes[idx].axis("off")
+
+    plt.tight_layout()
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved Scenario 3 map plot: {save_path}")
+
+
+def plot_scenario3_metrics(batch_results: list[dict], dt: float = 0.05, save_path: str = "results/plots/scenario_3_metrics.png") -> None:
+    """Save quantitative metrics charts for Scenario 3 trials."""
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    labels = [r.get("label", str(i)) for i, r in enumerate(batch_results)]
+    x = np.arange(len(labels))
+    width = 0.35
+
+    t_tot = [r["result"]["time"] for r in batch_results]
+    t_det = [r["result"]["time_detected"] if r["result"]["time_detected"] is not None else r["result"]["time"] for r in batch_results]
+    free_m2 = [r["result"]["mapped_areas"]["free_m2"] for r in batch_results]
+    occ_m2 = [r["result"]["mapped_areas"]["occupied_m2"] for r in batch_results]
+    lengths = [r["result"]["path_length"] for r in batch_results]
+    cols = [r["result"]["collisions"] for r in batch_results]
+
+    fig, axs = plt.subplots(2, 2, figsize=(11, 8))
+
+    # 1. Detection vs Total Time
+    axs[0, 0].bar(x - width / 2, t_det, width, label="Time to Detect", color="tab:green")
+    axs[0, 0].bar(x + width / 2, t_tot, width, label="Total Time", color="tab:blue")
+    axs[0, 0].set_title("Detection & Completion Time")
+    axs[0, 0].set_ylabel("Time [s]")
+    axs[0, 0].set_xticks(x)
+    axs[0, 0].set_xticklabels(labels)
+    axs[0, 0].legend(fontsize=8)
+    axs[0, 0].grid(True, axis="y", color="0.9")
+
+    # 2. Mapped Areas
+    axs[0, 1].bar(x - width / 2, free_m2, width, label="Free [m²]", color="mediumseagreen")
+    axs[0, 1].bar(x + width / 2, occ_m2, width, label="Occupied [m²]", color="indianred")
+    axs[0, 1].set_title("Mapped Areas (ExplorationGrid)")
+    axs[0, 1].set_ylabel("Area [m²]")
+    axs[0, 1].set_xticks(x)
+    axs[0, 1].set_xticklabels(labels)
+    axs[0, 1].legend(fontsize=8)
+    axs[0, 1].grid(True, axis="y", color="0.9")
+
+    # 3. Path Length & Collisions
+    bars = axs[1, 0].bar(x, lengths, width=0.45, color="tab:blue", label="Path Length")
+    for bar, c_cnt in zip(bars, cols):
+        axs[1, 0].text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f"col={c_cnt}", ha="center", va="bottom", fontsize=7.5)
+    axs[1, 0].set_title("Trajectory Length & Collisions")
+    axs[1, 0].set_ylabel("Meters [m]")
+    axs[1, 0].set_xticks(x)
+    axs[1, 0].set_xticklabels(labels)
+    axs[1, 0].grid(True, axis="y", color="0.9")
+
+    # 4. Velocity profile for trial 0
+    if len(batch_results) > 0:
+        res0 = batch_results[0]["result"]
+        t = np.arange(len(res0["v_hist"])) * dt
+        axs[1, 1].plot(t, res0["v_hist"], color="tab:blue", label="v [m/s]")
+        axs[1, 1].plot(t, res0["w_hist"], color="tab:orange", alpha=0.8, label="w [rad/s]")
+        if res0["time_detected"] is not None:
+            axs[1, 1].axvline(res0["time_detected"], color="tab:green", linestyle="--", label="Detected")
+        axs[1, 1].set_title(f"Control Inputs - {labels[0]}")
+        axs[1, 1].set_xlabel("Time [s]")
+        axs[1, 1].legend(fontsize=8)
+        axs[1, 1].grid(True, color="0.9")
+
+    plt.tight_layout()
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved Scenario 3 metrics plot: {save_path}")

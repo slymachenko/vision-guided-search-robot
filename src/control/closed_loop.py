@@ -107,129 +107,200 @@ def compute_apf_control(
 
 class ReactiveExplorer:
     """
-    Local reactive explorer with corridor-aware clearance check:
-    - Drives through narrow passages without false stops.
-    - Only triggers scanning when an obstacle directly blocks the frontal path.
-    - Turns towards the side with greater clearance.
+    Grid-guided frontier explorer and target approach controller for Scenario 3.
+    - Explores UNKNOWN frontiers on ExplorationGrid using A* over safe FREE cells.
+    - Rotates in place when heading error exceeds half-FOV so the robot always sees ahead.
+    - Applies local tangential APF repulsion from mapped OCCUPIED cells.
     """
 
     def __init__(
         self,
         v_cruise: float = 0.24,
-        w_scan: float = 1.30,
-        min_front_clearance: float = 0.045,  # Stops only when front bumper is 4.5 cm from obstacle
+        w_max: float = 1.80,
+        fov_angle: float = np.deg2rad(70.0),
         dt: float = 0.05,
     ):
-        self.v_cruise = v_cruise
-        self.w_scan = w_scan
-        self.min_front_clearance = min_front_clearance
-        self.dt = dt
+        self.v_cruise = float(v_cruise)
+        self.w_max = float(w_max)
+        self.half_fov = float(fov_angle) / 2.0
+        self.dt = float(dt)
 
-        self.state = "DRIVING"     # "DRIVING" or "SCANNING"
+        self.mode = "EXPLORING"
+        self.goal_xy: tuple[float, float] | None = None
+        self.waypoints: list[tuple[float, float]] = []
+        self.wp_idx = 0
+        self.goal_steps = 0
         self.scan_steps_left = 0
-        self.drive_steps = 0
-        self.turn_dir = 1.0        # 1.0 = left, -1.0 = right
+        self.stall_steps = 0
+        self.last_progress_pos: np.ndarray | None = None
+        self._did_full_scan = False
 
-    def _check_frontal_block(
+    def _drive_to_point(
         self,
-        p: np.ndarray,
-        theta: np.ndarray,
-        known_obstacles: list[dict],
-    ) -> tuple[bool, float, float]:
-        """
-        Check if an obstacle directly blocks the robot's front corridor (width = 12 cm).
-        Returns: (is_blocked, clearance_left, clearance_right).
-        """
-        c, s = np.cos(theta), np.sin(theta)
-        u_fwd = np.array([c, s])      # Forward direction
-        u_lat = np.array([-s, c])     # Lateral direction (left)
+        q: np.ndarray,
+        goal_xy: tuple[float, float] | np.ndarray,
+        grid,
+        stop_dist: float = 0.0,
+    ) -> tuple[float, float]:
+        """Compute smooth FOV-aware unicycle (v, w) with local APF avoidance from OCCUPIED cells."""
+        x, y, theta = float(q[0]), float(q[1]), float(q[2])
+        p = np.array([x, y], dtype=float)
+        diff = np.asarray(goal_xy[:2], dtype=float) - p
+        dist = float(np.linalg.norm(diff))
 
-        robot_half_length = 0.05
-        robot_half_width = 0.04
-        corridor_half_width = robot_half_width + 0.02  # 6 cm corridor width from center line
+        if (stop_dist > 0.0 and dist <= stop_dist) or dist < 1e-4:
+            return 0.0, 0.0
 
-        is_blocked = False
-        min_clear_left = 1.0
-        min_clear_right = 1.0
+        f_att = (diff / dist) * (min(1.0, dist / 0.20) if stop_dist > 0.0 else 1.0)
 
-        for obs in known_obstacles:
-            d, n_hat = closest_surface_info(p, obs, r_robot=ROBOT_RADIUS)
-            # Vector pointing from obstacle surface towards robot
-            rel_vec = -n_hat * (d + ROBOT_RADIUS)
-            fwd_dist = float(np.dot(rel_vec, u_fwd))
-            lat_dist = float(np.dot(rel_vec, u_lat))
+        # Repulsive + tangential forces from nearest mapped OCCUPIED cells per quadrant
+        f_rep = np.zeros(2, dtype=float)
+        d0 = 0.055
+        k_rep = 0.0028
+        eff_robot_r = ROBOT_RADIUS + 0.5 * grid.res
+        for occ_pt in grid.get_local_occupied_points(p, eff_robot_r + d0):
+            vec = p - occ_pt
+            norm_v = float(np.linalg.norm(vec))
+            d = max(norm_v - eff_robot_r, 1e-3)
+            if d < d0 and norm_v > 1e-6:
+                n_hat = vec / norm_v
+                t_hat = np.array([-n_hat[1], n_hat[0]])
+                if np.dot(t_hat, diff) < 0.0:
+                    t_hat = -t_hat
+                mag = min(k_rep * (1.0 / d - 1.0 / d0) / (d ** 2), 2.5)
+                f_rep += mag * (n_hat + 0.65 * t_hat)
 
-            # 1. Check if obstacle is directly in front of the robot's path
-            if fwd_dist > 0.0 and abs(lat_dist) <= corridor_half_width:
-                clearance_ahead = fwd_dist - robot_half_length
-                if clearance_ahead <= self.min_front_clearance:
-                    is_blocked = True
+        f_tot = f_att + f_rep
+        des_theta = float(np.arctan2(f_tot[1], f_tot[0]))
+        heading_err = wrap(des_theta - theta)
 
-            # 2. Measure lateral clearances to decide turn direction
-            if lat_dist > 0.0:
-                min_clear_left = min(min_clear_left, d)
-            else:
-                min_clear_right = min(min_clear_right, d)
+        w = float(np.clip(2.8 * heading_err, -self.w_max, self.w_max))
+        # Smoothly drop forward velocity to zero at half_fov so robot never drives blind outside FOV
+        if abs(heading_err) >= self.half_fov:
+            return 0.0, w
 
-        return is_blocked, min_clear_left, min_clear_right
+        speed_scale = min(1.0, dist / 0.15) if stop_dist > 0.0 else 1.0
+        turn_scale = float(np.cos((0.5 * np.pi) * (abs(heading_err) / self.half_fov)))
+        v = float(self.v_cruise * speed_scale * turn_scale)
+        return v, w
+
+    def _plan_exploration(self, q: np.ndarray, grid) -> None:
+        """Select a reachable frontier (or fallback cell) and plan waypoints on FREE cells."""
+        p = (float(q[0]), float(q[1]))
+        new_goal = grid.select_exploration_goal(q)
+        if new_goal is not None:
+            path = grid.plan_path(p, new_goal)
+            if path:
+                self.goal_xy = new_goal
+                self.waypoints = path
+                self.wp_idx = 1 if len(path) > 1 else 0
+                self.goal_steps = 0
+                self._did_full_scan = False
+                return
+
+        if not self._did_full_scan:
+            self.goal_xy = None
+            self.waypoints = []
+            self.scan_steps_left = int(np.ceil((2.0 * np.pi) / (self.w_max * 0.85) / self.dt))
+            self._did_full_scan = True
+            return
+
+        fallback = grid.select_fallback_goal(q)
+        if fallback is not None:
+            path = grid.plan_path(p, fallback)
+            if path:
+                self.goal_xy = fallback
+                self.waypoints = path
+                self.wp_idx = 1 if len(path) > 1 else 0
+                self.goal_steps = 0
+                self._did_full_scan = False
+                return
+
+        self.scan_steps_left = int(0.8 / self.dt)
 
     def compute_step(
         self,
         q: np.ndarray,
-        known_obstacles: list[dict],
-        r_robot: float = ROBOT_RADIUS,
+        grid,
+        target_xy: np.ndarray | None = None,
     ) -> tuple[float, float]:
-        """Compute (v, omega) for the current exploration step."""
-        x, y, theta = q
-        p = np.array([x, y], dtype=float)
+        """Compute (v, omega) for exploration or target approach using ExplorationGrid."""
+        p = np.array([q[0], q[1]], dtype=float)
+        p_tuple = (float(p[0]), float(p[1]))
 
-        is_blocked, clear_left, clear_right = self._check_frontal_block(p, theta, known_obstacles)
+        if self.last_progress_pos is None:
+            self.last_progress_pos = p.copy()
 
-        # State transition logic
-        if self.state == "DRIVING":
-            self.drive_steps += 1
-            # Trigger scan if path directly ahead is blocked, or periodic scan every ~4 seconds in open space
-            if is_blocked or self.drive_steps > int(4.0 / self.dt):
-                self.state = "SCANNING"
-                # Scan duration: ~0.8s (about 60 deg rotation)
-                self.scan_steps_left = int(0.8 / self.dt)
-                # Turn towards the more open side
-                self.turn_dir = 1.0 if clear_left >= clear_right else -1.0
-                self.drive_steps = 0
+        # Phase 2: Target approaching via A* on ExplorationGrid + local APF
+        if target_xy is not None:
+            target_tuple = (float(target_xy[0]), float(target_xy[1]))
+            need_plan = (
+                self.mode != "APPROACHING"
+                or not self.waypoints
+                or self.wp_idx >= len(self.waypoints)
+                or not grid.is_path_safe(self.waypoints[self.wp_idx:], p_tuple)
+            )
+            if need_plan:
+                self.mode = "APPROACHING"
+                self.scan_steps_left = 0
+                self.waypoints = grid.plan_path_to_target(p_tuple, target_tuple) or [p_tuple, target_tuple]
+                self.wp_idx = 1 if len(self.waypoints) > 1 else 0
 
-        elif self.state == "SCANNING":
-            self.scan_steps_left -= 1
-            # Once scan is done and front is not blocked, resume driving immediately
-            if self.scan_steps_left <= 0:
-                if not is_blocked:
-                    self.state = "DRIVING"
+            while self.wp_idx < len(self.waypoints) - 1:
+                if np.hypot(self.waypoints[self.wp_idx][0] - p[0], self.waypoints[self.wp_idx][1] - p[1]) <= 0.085:
+                    self.wp_idx += 1
                 else:
-                    # Keep rotating if still facing an obstacle directly ahead
-                    self.scan_steps_left = int(0.3 / self.dt)
+                    break
 
-        # Output velocity commands
-        if self.state == "SCANNING":
-            return 0.0, self.turn_dir * self.w_scan
+            is_final = self.wp_idx == len(self.waypoints) - 1
+            return self._drive_to_point(q, self.waypoints[self.wp_idx], grid, stop_dist=0.085 if is_final else 0.0)
 
-        # In DRIVING state: drive forward with smooth APF repulsive side-forces to stay centered
-        u_fwd = np.array([np.cos(theta), np.sin(theta)])
-        f_rep = np.zeros(2, dtype=float)
-        d0_side = 0.05  # Only gently push away if closer than 5 cm from surface
+        # Phase 1: Frontier-based exploration
+        self.mode = "EXPLORING"
+        if self.scan_steps_left > 0:
+            self.scan_steps_left -= 1
+            self.last_progress_pos = p.copy()
+            self.stall_steps = 0
+            return 0.0, self.w_max * 0.85
 
-        for obs in known_obstacles:
-            d, n_hat = closest_surface_info(p, obs, r_robot)
-            if d < d0_side:
-                mag = min(0.003 * (1.0 / d - 1.0 / d0_side) / (d ** 2), 2.0)
-                t_hat = np.array([-n_hat[1], n_hat[0]])
-                if np.dot(t_hat, u_fwd) < 0:
-                    t_hat = -t_hat
-                f_rep += mag * (n_hat + 0.5 * t_hat)
+        if np.linalg.norm(p - self.last_progress_pos) > 0.015:
+            self.last_progress_pos = p.copy()
+            self.stall_steps = 0
+        else:
+            self.stall_steps += 1
 
-        f_tot = u_fwd + f_rep
-        des_theta = float(np.arctan2(f_tot[1], f_tot[0]))
-        heading_err = wrap(des_theta - theta)
+        if self.stall_steps > 25:
+            self.stall_steps = 0
+            self.goal_xy = None
+            self.waypoints = []
+            self.scan_steps_left = int(0.8 / self.dt)
+            return 0.0, self.w_max * 0.85
 
-        w = float(np.clip(2.5 * heading_err, -1.8, 1.8))
-        v = float(self.v_cruise * max(0.0, np.cos(heading_err)))
+        need_replan = (
+            self.goal_xy is None
+            or not self.waypoints
+            or self.wp_idx >= len(self.waypoints)
+            or np.hypot(self.goal_xy[0] - p[0], self.goal_xy[1] - p[1]) <= 0.10
+            or (not self._did_full_scan and not grid.is_frontier_active(self.goal_xy))
+            or not grid.is_path_safe(self.waypoints[self.wp_idx:], p_tuple)
+            or self.goal_steps > 100
+        )
+        if need_replan:
+            self.stall_steps = 0
+            self._plan_exploration(q, grid)
+            if self.scan_steps_left > 0 or not self.waypoints:
+                return 0.0, self.w_max * 0.85
 
+        while self.wp_idx < len(self.waypoints) - 1:
+            if np.hypot(self.waypoints[self.wp_idx][0] - p[0], self.waypoints[self.wp_idx][1] - p[1]) <= 0.09:
+                self.wp_idx += 1
+            else:
+                break
+
+        self.goal_steps += 1
+        v, w = self._drive_to_point(q, self.waypoints[self.wp_idx], grid, stop_dist=0.0)
+        # Only track stall while actively trying to move forward (not during in-place turns)
+        if v <= 0.04:
+            self.stall_steps = 0
+            self.last_progress_pos = p.copy()
         return v, w
