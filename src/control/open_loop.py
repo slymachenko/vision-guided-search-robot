@@ -29,7 +29,7 @@ def plan_open_loop(
     w_bar: float = 1.0,
     v_bar: float = 0.3,
     dt: float = 0.05,
-    stop_distance: float = 0.08,
+    stop_distance: float = 0.09,
 ) -> list[tuple[float, float, int]]:
     """
     Plan open-loop commands [(v, w, n_steps), ...] through a sequence of waypoints.

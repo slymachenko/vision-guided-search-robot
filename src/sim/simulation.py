@@ -70,50 +70,47 @@ def run_dual_sim(
 
     for step in range(max_steps):
         # --- A. Open-Loop Step ---
-        if step < len(ol_steps):
-            u_ol_cmd = ol_steps[step]
-        else:
-            u_ol_cmd = [0.0, 0.0]
-            ol_done = True
+        if not ol_done:
+            if step < len(ol_steps):
+                u_ol = actuate(ol_steps[step], k_v_err=k_v_err_ol, k_w_err=k_w_err_ol)
+                v_hist_ol.append(u_ol[0])
+                w_hist_ol.append(u_ol[1])
+                robot_ol.step(u_ol)
+                q_hist_ol.append(robot_ol.q.copy())
 
-        u_ol = actuate(u_ol_cmd, k_v_err=k_v_err_ol, k_w_err=k_w_err_ol)
-        v_hist_ol.append(u_ol[0])
-        w_hist_ol.append(u_ol[1])
-        robot_ol.step(u_ol)
-        q_hist_ol.append(robot_ol.q.copy())
+                # Check collision OL
+                is_col_ol = check_collision(robot_ol.q, obstacles, objective, ROBOT_SIZE)
+                if is_col_ol and not was_col_ol:
+                    col_ol += 1
+                was_col_ol = is_col_ol
 
-        # Check collision OL
-        is_col_ol = check_collision(robot_ol.q, obstacles, objective, ROBOT_SIZE)
-        if is_col_ol and not was_col_ol:
-            col_ol += 1
-        was_col_ol = is_col_ol
+            if step >= len(ol_steps) - 1:
+                ol_done = True
 
         # --- B. Closed-Loop Step (APF) ---
-        q_measured = robot_cl.q.copy()
-        if noise_pos_std > 0.0:
-            q_measured[:2] += np.random.normal(0.0, noise_pos_std, size=2)
+        if not cl_done:
+            q_measured = robot_cl.q.copy()
+            if noise_pos_std > 0.0:
+                q_measured[:2] += np.random.normal(0.0, noise_pos_std, size=2)
 
-        dist_cl = float(np.linalg.norm(target_xy - q_measured[:2]))
-        if dist_cl <= stop_distance + 0.005:
-            u_cl_cmd = [0.0, 0.0]
-            cl_done = True
-        else:
-            v_apf, w_apf, _ = compute_apf_control(
-                q_measured, target_xy, obstacles, r_robot=ROBOT_RADIUS, stop_dist=stop_distance
-            )
-            u_cl_cmd = [v_apf, w_apf]
+            dist_cl = float(np.linalg.norm(target_xy - q_measured[:2]))
+            if dist_cl <= stop_distance:
+                cl_done = True
+            else:
+                v_apf, w_apf, _ = compute_apf_control(
+                    q_measured, target_xy, obstacles, r_robot=ROBOT_RADIUS, stop_dist=stop_distance
+                )
+                u_cl = actuate([v_apf, w_apf], k_v_err=k_v_err_cl, k_w_err=k_w_err_cl)
+                v_hist_cl.append(u_cl[0])
+                w_hist_cl.append(u_cl[1])
+                robot_cl.step(u_cl)
+                q_hist_cl.append(robot_cl.q.copy())
 
-        u_cl = actuate(u_cl_cmd, k_v_err=k_v_err_cl, k_w_err=k_w_err_cl)
-        v_hist_cl.append(u_cl[0])
-        w_hist_cl.append(u_cl[1])
-        robot_cl.step(u_cl)
-        q_hist_cl.append(robot_cl.q.copy())
-
-        # Check collision CL
-        is_col_cl = check_collision(robot_cl.q, obstacles, objective, ROBOT_SIZE)
-        if is_col_cl and not was_col_cl:
-            col_cl += 1
-        was_col_cl = is_col_cl
+                # Check collision CL
+                is_col_cl = check_collision(robot_cl.q, obstacles, objective, ROBOT_SIZE)
+                if is_col_cl and not was_col_cl:
+                    col_cl += 1
+                was_col_cl = is_col_cl
 
         # --- C. Swift 3D Visualization ---
         if env is not None:

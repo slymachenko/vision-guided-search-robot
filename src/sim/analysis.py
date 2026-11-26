@@ -129,7 +129,7 @@ def plot_metrics_comparison(batch_results: list[dict], dt: float = 0.05, save_pa
     # 1. Final distance from target center
     axs[0, 0].bar(x - width / 2, dist_ol, width, label="Open-Loop", color="tab:orange")
     axs[0, 0].bar(x + width / 2, dist_cl, width, label="Closed-Loop", color="tab:blue")
-    axs[0, 0].axhline(0.08, color="red", linestyle=":", label="Stop Target (0.08m)")
+    axs[0, 0].axhline(0.09, color="red", linestyle=":", label="Stop Target (0.09m)")
     axs[0, 0].set_title("Final Distance to Target Center")
     axs[0, 0].set_ylabel("Distance [m]")
     axs[0, 0].set_xticks(x)

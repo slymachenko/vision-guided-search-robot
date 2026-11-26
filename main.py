@@ -22,7 +22,7 @@ from src.sim.analysis import plot_trajectories_2d, plot_metrics_comparison
 # CONFIGURATION
 # =============================================================================
 SCENARIO = 2              # 1: Ideal | 2: Disturbances/Noise | 3: Vision Search
-USE_RANDOM = False        # False: fixed arena | True: random seeds
+USE_RANDOM = True        # False: fixed arena | True: random seeds
 N_SEEDS = 5               # Trials to run if USE_RANDOM is True
 SPEED_FACTOR = 3.0        # Swift visual speedup (1.0 = real-time, 2.0 = 2x speed)
 PAUSE_BETWEEN = 2.0       # Seconds to observe final pose between worlds
