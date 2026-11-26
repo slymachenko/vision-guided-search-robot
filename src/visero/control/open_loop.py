@@ -40,7 +40,7 @@ def plan_open_loop(
     targets = waypoints[1:] if len(waypoints) > 1 else waypoints
 
     for idx, (gx, gy) in enumerate(targets):
-        is_last_waypoint = (idx == len(targets) - 1)
+        is_last_waypoint = idx == len(targets) - 1
         x0, y0, theta0 = q_assumed
         d = float(np.hypot(gx - x0, gy - y0))
         if d < 1e-4:

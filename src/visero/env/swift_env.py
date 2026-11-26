@@ -10,7 +10,7 @@ import swift
 import time
 import logging
 
-from src.env.arena import DEFAULT_WALLS, ROBOT_SIZE
+from visero.env.arena import DEFAULT_WALLS, ROBOT_SIZE
 
 
 def init_swift(

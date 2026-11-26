@@ -4,12 +4,13 @@ Generates unicycle velocity commands (v, omega) based on attractive and repulsiv
 """
 
 import numpy as np
-from src.control.open_loop import wrap
-from src.env.arena import ROBOT_RADIUS
+from visero.control.open_loop import wrap
+from visero.env.arena import ROBOT_RADIUS
 
 
-def closest_surface_info(p: np.ndarray, obs: dict, r_robot: float = ROBOT_RADIUS) -> tuple[float,
-np.ndarray]:
+def closest_surface_info(
+    p: np.ndarray, obs: dict, r_robot: float = ROBOT_RADIUS
+) -> tuple[float, np.ndarray]:
     """
     Compute surface clearance distance d and outward normal n_hat
     from 2D robot center p to an obstacle (cylinder or box).
@@ -90,7 +91,7 @@ def compute_apf_control(
             if np.dot(t_hat, diff_target) < 0:
                 t_hat = -t_hat
 
-            raw_mag = k_rep * (1.0 / d - 1.0 / d0) / (d ** 2)
+            raw_mag = k_rep * (1.0 / d - 1.0 / d0) / (d**2)
             mag = min(raw_mag, 3.0 * k_att)
             f_rep += mag * (n_hat + alpha_tan * t_hat)
 

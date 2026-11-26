@@ -14,20 +14,86 @@ ROBOT_RADIUS = float(0.5 * np.hypot(ROBOT_SIZE[0], ROBOT_SIZE[1]))
 ARENA_BOUNDS = (0.0, 2.0, 0.0, 2.0)  # (x_min, x_max, y_min, y_max)
 
 DEFAULT_WALLS = [
-    {"type": "box", "kind": "wall", "size": (2.01, 0.01, 0.2), "center": (1.0, 0.0, 0.1), "yaw": 0.0},
-    {"type": "box", "kind": "wall", "size": (2.01, 0.01, 0.2), "center": (1.0, 2.0, 0.1), "yaw": 0.0},
-    {"type": "box", "kind": "wall", "size": (0.01, 2.01, 0.2), "center": (0.0, 1.0, 0.1), "yaw": 0.0},
-    {"type": "box", "kind": "wall", "size": (0.01, 2.01, 0.2), "center": (2.0, 1.0, 0.1), "yaw": 0.0},
+    {
+        "type": "box",
+        "kind": "wall",
+        "size": (2.01, 0.01, 0.2),
+        "center": (1.0, 0.0, 0.1),
+        "yaw": 0.0,
+    },
+    {
+        "type": "box",
+        "kind": "wall",
+        "size": (2.01, 0.01, 0.2),
+        "center": (1.0, 2.0, 0.1),
+        "yaw": 0.0,
+    },
+    {
+        "type": "box",
+        "kind": "wall",
+        "size": (0.01, 2.01, 0.2),
+        "center": (0.0, 1.0, 0.1),
+        "yaw": 0.0,
+    },
+    {
+        "type": "box",
+        "kind": "wall",
+        "size": (0.01, 2.01, 0.2),
+        "center": (2.0, 1.0, 0.1),
+        "yaw": 0.0,
+    },
 ]
 
 FIXED_OBSTACLES = [
-    {"type": "box", "kind": "obstacle", "size": (0.8, 0.3, 0.2), "center": (1.3, 1.0, 0.1), "yaw": 0.0},
-    {"type": "box", "kind": "obstacle", "size": (0.2, 0.4, 0.2), "center": (0.3, 0.6, 0.1), "yaw": 0.0},
-    {"type": "box", "kind": "obstacle", "size": (0.1, 0.3, 0.2), "center": (0.7, 0.4, 0.1), "yaw": 0.0},
-    {"type": "box", "kind": "obstacle", "size": (0.6, 0.05, 0.2), "center": (0.3, 1.7, 0.1), "yaw": 0.0},
-    {"type": "cylinder", "kind": "obstacle", "radius": 0.1, "height": 0.2, "center": (1.2, 0.4, 0.1)},
-    {"type": "cylinder", "kind": "obstacle", "radius": 0.1, "height": 0.2, "center": (0.3, 1.3, 0.1)},
-    {"type": "cylinder", "kind": "obstacle", "radius": 0.2, "height": 0.2, "center": (1.3, 1.6, 0.1)},
+    {
+        "type": "box",
+        "kind": "obstacle",
+        "size": (0.8, 0.3, 0.2),
+        "center": (1.3, 1.0, 0.1),
+        "yaw": 0.0,
+    },
+    {
+        "type": "box",
+        "kind": "obstacle",
+        "size": (0.2, 0.4, 0.2),
+        "center": (0.3, 0.6, 0.1),
+        "yaw": 0.0,
+    },
+    {
+        "type": "box",
+        "kind": "obstacle",
+        "size": (0.1, 0.3, 0.2),
+        "center": (0.7, 0.4, 0.1),
+        "yaw": 0.0,
+    },
+    {
+        "type": "box",
+        "kind": "obstacle",
+        "size": (0.6, 0.05, 0.2),
+        "center": (0.3, 1.7, 0.1),
+        "yaw": 0.0,
+    },
+    {
+        "type": "cylinder",
+        "kind": "obstacle",
+        "radius": 0.1,
+        "height": 0.2,
+        "center": (1.2, 0.4, 0.1),
+    },
+    {
+        "type": "cylinder",
+        "kind": "obstacle",
+        "radius": 0.1,
+        "height": 0.2,
+        "center": (0.3, 1.3, 0.1),
+    },
+    {
+        "type": "cylinder",
+        "kind": "obstacle",
+        "radius": 0.2,
+        "height": 0.2,
+        "center": (1.3, 1.6, 0.1),
+    },
 ]
 
 
@@ -74,11 +140,19 @@ def check_collision(
     rot = np.array([[c, -s], [s, c]])
 
     # 9 representative test points on the robot body
-    local_pts = np.array([
-        [0.0, 0.0],
-        [hx, hy], [hx, -hy], [-hx, hy], [-hx, -hy],
-        [hx, 0.0], [-hx, 0.0], [0.0, hy], [0.0, -hy],
-    ])
+    local_pts = np.array(
+        [
+            [0.0, 0.0],
+            [hx, hy],
+            [hx, -hy],
+            [-hx, hy],
+            [-hx, -hy],
+            [hx, 0.0],
+            [-hx, 0.0],
+            [0.0, hy],
+            [0.0, -hy],
+        ]
+    )
     world_pts = local_pts @ rot.T + np.array([x, y])
 
     # 1. Collision with obstacles and walls
@@ -169,7 +243,7 @@ def generate_random_scenario(
 
             # Ensure corridors between obstacles are traversable
             valid = True
-            for existing in obstacles[len(DEFAULT_WALLS):]:
+            for existing in obstacles[len(DEFAULT_WALLS) :]:
                 r_ex = obstacle_bounding_radius(existing)
                 ex_x, ex_y = existing["center"][0], existing["center"][1]
                 if np.hypot(cx - ex_x, cy - ex_y) < (r_cand + r_ex + min_passage):
@@ -200,5 +274,10 @@ def generate_random_scenario(
         return q_start, obstacles, objective
 
     # Fallback target if placement fails
-    objective = {"type": "sphere", "kind": "objective", "radius": 0.02, "center": (1.8, 1.8, 0.02)}
+    objective = {
+        "type": "sphere",
+        "kind": "objective",
+        "radius": 0.02,
+        "center": (1.8, 1.8, 0.02),
+    }
     return q_start, obstacles, objective

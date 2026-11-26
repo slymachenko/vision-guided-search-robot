@@ -4,7 +4,7 @@ Path planning module: 2D Occupancy Grid, A* search and Line-of-Sight waypoint pr
 
 import heapq
 import numpy as np
-from src.env.arena import ROBOT_RADIUS, dist_point_to_obstacle
+from visero.env.arena import ROBOT_RADIUS, dist_point_to_obstacle
 
 
 class OccupancyGrid:
@@ -39,19 +39,24 @@ class OccupancyGrid:
                 hx = obs["size"][0] / 2.0 + self.inflation_radius
                 hy = obs["size"][1] / 2.0 + self.inflation_radius
                 in_wall = (
-                    (points[:, 0] >= cx - hx) & (points[:, 0] <= cx + hx) &
-                    (points[:, 1] >= cy - hy) & (points[:, 1] <= cy + hy)
+                    (points[:, 0] >= cx - hx)
+                    & (points[:, 0] <= cx + hx)
+                    & (points[:, 1] >= cy - hy)
+                    & (points[:, 1] <= cy + hy)
                 )
                 occupied |= in_wall
             elif obs["type"] == "cylinder":
                 cx, cy = obs["center"][0], obs["center"][1]
                 thresh = obs["radius"] + self.inflation_radius
                 dists_sq = (points[:, 0] - cx) ** 2 + (points[:, 1] - cy) ** 2
-                occupied |= (dists_sq <= thresh ** 2)
+                occupied |= dists_sq <= thresh**2
             elif obs["type"] == "box":
                 # Check distances for box obstacles
                 for idx, pt in enumerate(points):
-                    if not occupied[idx] and dist_point_to_obstacle(pt, obs) <= self.inflation_radius:
+                    if (
+                        not occupied[idx]
+                        and dist_point_to_obstacle(pt, obs) <= self.inflation_radius
+                    ):
                         occupied[idx] = True
 
         self.grid = occupied.reshape((self.height, self.width)).astype(np.uint8)
@@ -111,9 +116,14 @@ def astar_search(
     closed_set = set()
 
     moves = [
-        (1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
-        (1, 1, np.sqrt(2)), (-1, 1, np.sqrt(2)),
-        (1, -1, np.sqrt(2)), (-1, -1, np.sqrt(2)),
+        (1, 0, 1.0),
+        (-1, 0, 1.0),
+        (0, 1, 1.0),
+        (0, -1, 1.0),
+        (1, 1, np.sqrt(2)),
+        (-1, 1, np.sqrt(2)),
+        (1, -1, np.sqrt(2)),
+        (-1, -1, np.sqrt(2)),
     ]
 
     while open_heap:

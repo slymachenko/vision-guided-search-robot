@@ -5,27 +5,27 @@ Executes Open-Loop (orange) and Closed-Loop (blue) side-by-side in Swift.
 
 import time
 import numpy as np
-from src.env.arena import get_fixed_scenario, generate_random_scenario
-from src.env.swift_env import (
+from visero.env.arena import get_fixed_scenario, generate_random_scenario
+from visero.env.swift_env import (
     init_swift,
     load_scenario_in_swift,
     create_robot_marker,
     update_robot_pose,
     close_swift_env,
 )
-from src.control.planner import plan_path
-from src.control.open_loop import plan_open_loop
-from src.sim.simulation import run_dual_sim
-from src.sim.analysis import plot_trajectories_2d, plot_metrics_comparison
+from visero.control.planner import plan_path
+from visero.control.open_loop import plan_open_loop
+from visero.sim.simulation import run_dual_sim
+from visero.sim.analysis import plot_trajectories_2d, plot_metrics_comparison
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-SCENARIO = 2              # 1: Ideal | 2: Disturbances/Noise | 3: Vision Search
-USE_RANDOM = True        # False: fixed arena | True: random seeds
-N_SEEDS = 5               # Trials to run if USE_RANDOM is True
-SPEED_FACTOR = 3.0        # Swift visual speedup (1.0 = real-time, 2.0 = 2x speed)
-PAUSE_BETWEEN = 2.0       # Seconds to observe final pose between worlds
+SCENARIO = 2  # 1: Ideal | 2: Disturbances/Noise | 3: Vision Search
+USE_RANDOM = True  # False: fixed arena | True: random seeds
+N_SEEDS = 5  # Trials to run if USE_RANDOM is True
+SPEED_FACTOR = 3.0  # Swift visual speedup (1.0 = real-time, 2.0 = 2x speed)
+PAUSE_BETWEEN = 2.0  # Seconds to observe final pose between worlds
 
 
 def main():
@@ -38,19 +38,27 @@ def main():
     robot_ol_vis = create_robot_marker(env, color=(1.0, 0.5, 0.0, 1.0))
     robot_cl_vis = create_robot_marker(env, color=(0.2, 0.5, 0.9, 1.0))
 
-    # Parameter configuration based on SCENARIO                                                               
-    if SCENARIO == 1:                                                                                         
-        # Ideal conditions: perfect actuation, no offset                                                      
-        k_v_err_ol, k_w_err_ol = 1.0, 1.0                                                                     
-        k_v_err_cl, k_w_err_cl = 1.0, 1.0                                                                     
-        initial_offset = np.array([0.0, 0.0, 0.0])                                                            
-        noise_std = 0.0                                                                                       
-    elif SCENARIO == 2:                                                                                       
-        # Realistic uncertainties: actuation errors, start offset, sensor noise                               
-        k_v_err_ol, k_w_err_ol = 0.93, 1.08        # Open loop suffers wheel drift/miscalibration             
-        k_v_err_cl, k_w_err_cl = 0.95, 1.05        # Closed loop has same physical imperfections              
-        initial_offset = np.array([0.03, -0.02, np.deg2rad(4.0)])  # 3cm x, -2cm y, 4 deg yaw offset          
-        noise_std = 0.003                          # 3 mm sensor measurement noise
+    # Parameter configuration based on SCENARIO
+    if SCENARIO == 1:
+        # Ideal conditions: perfect actuation, no offset
+        k_v_err_ol, k_w_err_ol = 1.0, 1.0
+        k_v_err_cl, k_w_err_cl = 1.0, 1.0
+        initial_offset = np.array([0.0, 0.0, 0.0])
+        noise_std = 0.0
+    elif SCENARIO == 2:
+        # Realistic uncertainties: actuation errors, start offset, sensor noise
+        k_v_err_ol, k_w_err_ol = (
+            0.93,
+            1.08,
+        )  # Open loop suffers wheel drift/miscalibration
+        k_v_err_cl, k_w_err_cl = (
+            0.95,
+            1.05,
+        )  # Closed loop has same physical imperfections
+        initial_offset = np.array(
+            [0.03, -0.02, np.deg2rad(4.0)]
+        )  # 3cm x, -2cm y, 4 deg yaw offset
+        noise_std = 0.003  # 3 mm sensor measurement noise
 
     try:
         scenarios = []
@@ -98,15 +106,17 @@ def main():
             res_ol = results["open_loop"]
             res_cl = results["closed_loop"]
 
-            batch_results.append({
-                "label": label,
-                "q_start": q_start_real,
-                "obstacles": obstacles,
-                "objective": objective,
-                "waypoints": waypoints,
-                "open_loop": res_ol,
-                "closed_loop": res_cl,
-            })
+            batch_results.append(
+                {
+                    "label": label,
+                    "q_start": q_start_real,
+                    "obstacles": obstacles,
+                    "objective": objective,
+                    "waypoints": waypoints,
+                    "open_loop": res_ol,
+                    "closed_loop": res_cl,
+                }
+            )
 
             print("\nRESULTS SUMMARY:")
             print(
@@ -124,8 +134,12 @@ def main():
 
         # Batch analysis and plots
         prefix = f"scenario_{SCENARIO}_" + ("random_batch" if USE_RANDOM else "fixed")
-        plot_trajectories_2d(batch_results, save_path=f"results/plots/{prefix}_trajectories.png")
-        plot_metrics_comparison(batch_results, dt=0.05, save_path=f"results/plots/{prefix}_metrics.png")
+        plot_trajectories_2d(
+            batch_results, save_path=f"outputs/figures/{prefix}_trajectories.png"
+        )
+        plot_metrics_comparison(
+            batch_results, dt=0.05, save_path=f"outputs/figures/{prefix}_metrics.png"
+        )
 
     except KeyboardInterrupt:
         print("\nSimulation stopped by user.")

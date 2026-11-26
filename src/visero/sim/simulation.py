@@ -7,10 +7,10 @@ import roboticstoolbox as rtb
 import spatialgeometry as sg
 import spatialmath as sm
 
-from src.control.closed_loop import compute_apf_control
-from src.control.open_loop import actuate
-from src.env.arena import check_collision, ROBOT_RADIUS, ROBOT_SIZE
-from src.env.swift_env import update_robot_pose
+from visero.control.closed_loop import compute_apf_control
+from visero.control.open_loop import actuate
+from visero.env.arena import check_collision, ROBOT_RADIUS, ROBOT_SIZE
+from visero.env.swift_env import update_robot_pose
 
 
 def run_dual_sim(
@@ -79,7 +79,9 @@ def run_dual_sim(
                 q_hist_ol.append(robot_ol.q.copy())
 
                 # Check collision OL
-                is_col_ol = check_collision(robot_ol.q, obstacles, objective, ROBOT_SIZE)
+                is_col_ol = check_collision(
+                    robot_ol.q, obstacles, objective, ROBOT_SIZE
+                )
                 if is_col_ol and not was_col_ol:
                     col_ol += 1
                 was_col_ol = is_col_ol
@@ -98,7 +100,11 @@ def run_dual_sim(
                 cl_done = True
             else:
                 v_apf, w_apf, _ = compute_apf_control(
-                    q_measured, target_xy, obstacles, r_robot=ROBOT_RADIUS, stop_dist=stop_distance
+                    q_measured,
+                    target_xy,
+                    obstacles,
+                    r_robot=ROBOT_RADIUS,
+                    stop_dist=stop_distance,
                 )
                 u_cl = actuate([v_apf, w_apf], k_v_err=k_v_err_cl, k_w_err=k_w_err_cl)
                 v_hist_cl.append(u_cl[0])
@@ -107,7 +113,9 @@ def run_dual_sim(
                 q_hist_cl.append(robot_cl.q.copy())
 
                 # Check collision CL
-                is_col_cl = check_collision(robot_cl.q, obstacles, objective, ROBOT_SIZE)
+                is_col_cl = check_collision(
+                    robot_cl.q, obstacles, objective, ROBOT_SIZE
+                )
                 if is_col_cl and not was_col_cl:
                     col_cl += 1
                 was_col_cl = is_col_cl
@@ -117,12 +125,18 @@ def run_dual_sim(
             # Leave breadcrumb trail every 6 steps
             if step % 6 == 0:
                 if not ol_done:
-                    c_ol = sg.Sphere(radius=0.007, pose=sm.SE3(robot_ol.q[0], robot_ol.q[1], 0.007),
-                    color=(1.0, 0.5, 0.0, 0.6))
+                    c_ol = sg.Sphere(
+                        radius=0.007,
+                        pose=sm.SE3(robot_ol.q[0], robot_ol.q[1], 0.007),
+                        color=(1.0, 0.5, 0.0, 0.6),
+                    )
                     swift_state["dynamic_handles"].append(env.add(c_ol))
                 if not cl_done:
-                    c_cl = sg.Sphere(radius=0.007, pose=sm.SE3(robot_cl.q[0], robot_cl.q[1], 0.007),
-                    color=(0.2, 0.5, 0.9, 0.6))
+                    c_cl = sg.Sphere(
+                        radius=0.007,
+                        pose=sm.SE3(robot_cl.q[0], robot_cl.q[1], 0.007),
+                        color=(0.2, 0.5, 0.9, 0.6),
+                    )
                     swift_state["dynamic_handles"].append(env.add(c_cl))
 
             if step % render_stride == 0:
@@ -155,7 +169,9 @@ def run_dual_sim(
             "reached": (final_dist_ol <= 0.11) and (col_ol == 0),
             "collisions": col_ol,
             "time": len(v_hist_ol) * dt,
-            "path_length": float(np.sum(np.linalg.norm(np.diff(q_arr_ol[:, :2], axis=0), axis=1))),
+            "path_length": float(
+                np.sum(np.linalg.norm(np.diff(q_arr_ol[:, :2], axis=0), axis=1))
+            ),
             "final_distance": final_dist_ol,
             "q_hist": q_arr_ol,
             "v_hist": np.array(v_hist_ol),
@@ -165,7 +181,9 @@ def run_dual_sim(
             "reached": (final_dist_cl <= 0.11) and (col_cl == 0),
             "collisions": col_cl,
             "time": len(v_hist_cl) * dt,
-            "path_length": float(np.sum(np.linalg.norm(np.diff(q_arr_cl[:, :2], axis=0), axis=1))),
+            "path_length": float(
+                np.sum(np.linalg.norm(np.diff(q_arr_cl[:, :2], axis=0), axis=1))
+            ),
             "final_distance": final_dist_cl,
             "q_hist": q_arr_cl,
             "v_hist": np.array(v_hist_cl),

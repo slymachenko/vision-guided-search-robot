@@ -1,6 +1,6 @@
 """
 Plotting and performance analysis module.
-Generates 2D arena reconstructions and comparative metric charts in results/plots.
+Generates 2D arena reconstructions and comparative metric charts in outputs/figures.
 """
 
 import os
@@ -9,7 +9,9 @@ from matplotlib.patches import Circle, Polygon
 import numpy as np
 
 
-def draw_arena_2d(ax, obstacles: list[dict], objective: dict, q_start: np.ndarray | None = None) -> None:
+def draw_arena_2d(
+    ax, obstacles: list[dict], objective: dict, q_start: np.ndarray | None = None
+) -> None:
     """Draw perimeter walls, box obstacles (with yaw), cylinders and target on a 2D axis."""
     for obs in obstacles:
         if obs["type"] == "cylinder":
@@ -41,11 +43,14 @@ def draw_arena_2d(ax, obstacles: list[dict], objective: dict, q_start: np.ndarra
         # Direction arrow
         dx = 0.08 * np.cos(q_start[2])
         dy = 0.08 * np.sin(q_start[2])
-        ax.arrow(q_start[0], q_start[1], dx, dy, head_width=0.03, color="black", zorder=6)
+        ax.arrow(
+            q_start[0], q_start[1], dx, dy, head_width=0.03, color="black", zorder=6
+        )
 
 
-
-def plot_trajectories_2d(batch_results: list[dict], save_path: str = "results/plots/trajectories.png") -> None:
+def plot_trajectories_2d(
+    batch_results: list[dict], save_path: str = "outputs/figures/trajectories.png"
+) -> None:
     """
     Save 2D trajectory reconstructions comparing Open-Loop (orange) vs Closed-Loop (blue).
     Supports single runs or grid layouts for multiple random seeds.
@@ -73,13 +78,35 @@ def plot_trajectories_2d(batch_results: list[dict], save_path: str = "results/pl
         # 2. Draw planned A* waypoints
         if waypoints is not None and len(waypoints) > 0:
             wp = np.array(waypoints)
-            ax.plot(wp[:, 0], wp[:, 1], "g--o", markersize=3, lw=1.0, alpha=0.5, label="A* Plan")
+            ax.plot(
+                wp[:, 0],
+                wp[:, 1],
+                "g--o",
+                markersize=3,
+                lw=1.0,
+                alpha=0.5,
+                label="A* Plan",
+            )
 
         # 3. Draw executed trajectories
         q_ol = res_ol["q_hist"]
         q_cl = res_cl["q_hist"]
-        ax.plot(q_ol[:, 0], q_ol[:, 1], color="tab:orange", lw=1.8, linestyle="--", label="Open-Loop")
-        ax.plot(q_cl[:, 0], q_cl[:, 1], color="tab:blue", lw=1.8, linestyle="-", label="Closed-Loop")
+        ax.plot(
+            q_ol[:, 0],
+            q_ol[:, 1],
+            color="tab:orange",
+            lw=1.8,
+            linestyle="--",
+            label="Open-Loop",
+        )
+        ax.plot(
+            q_cl[:, 0],
+            q_cl[:, 1],
+            color="tab:blue",
+            lw=1.8,
+            linestyle="-",
+            label="Closed-Loop",
+        )
 
         label = item.get("label", f"Trial {idx}")
         status_ol = "OK" if res_ol["reached"] else "FAIL"
@@ -107,7 +134,11 @@ def plot_trajectories_2d(batch_results: list[dict], save_path: str = "results/pl
     print(f"Saved 2D trajectory plot: {save_path}")
 
 
-def plot_metrics_comparison(batch_results: list[dict], dt: float = 0.05, save_path: str = "results/plots/metrics.png") -> None:
+def plot_metrics_comparison(
+    batch_results: list[dict],
+    dt: float = 0.05,
+    save_path: str = "outputs/figures/metrics.png",
+) -> None:
     """Save quantitative comparison charts between Open-Loop and Closed-Loop."""
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     labels = [r.get("label", str(i)) for i, r in enumerate(batch_results)]
@@ -165,8 +196,16 @@ def plot_metrics_comparison(batch_results: list[dict], dt: float = 0.05, save_pa
         t_ol = np.arange(len(res0_ol["v_hist"])) * dt
         t_cl = np.arange(len(res0_cl["v_hist"])) * dt
 
-        axs[1, 1].plot(t_ol, res0_ol["v_hist"], color="tab:orange", linestyle="--", label="v OL (turn-drive)")
-        axs[1, 1].plot(t_cl, res0_cl["v_hist"], color="tab:blue", label="v CL (smooth APF)")
+        axs[1, 1].plot(
+            t_ol,
+            res0_ol["v_hist"],
+            color="tab:orange",
+            linestyle="--",
+            label="v OL (turn-drive)",
+        )
+        axs[1, 1].plot(
+            t_cl, res0_cl["v_hist"], color="tab:blue", label="v CL (smooth APF)"
+        )
         axs[1, 1].set_title(f"Linear Velocity v(t) - {labels[0]}")
         axs[1, 1].set_xlabel("Time [s]")
         axs[1, 1].set_ylabel("Velocity [m/s]")
