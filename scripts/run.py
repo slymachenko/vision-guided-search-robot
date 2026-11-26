@@ -3,8 +3,10 @@ Main entry point for robot simulation.
 Executes Open-Loop (orange) and Closed-Loop (blue) side-by-side in Swift.
 """
 
+import argparse
 import time
 import numpy as np
+
 from visero.env.arena import get_fixed_scenario, generate_random_scenario
 from visero.env.swift_env import (
     init_swift,
@@ -18,18 +20,50 @@ from visero.control.open_loop import plan_open_loop
 from visero.sim.simulation import run_dual_sim
 from visero.sim.analysis import plot_trajectories_2d, plot_metrics_comparison
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-SCENARIO = 2  # 1: Ideal | 2: Disturbances/Noise | 3: Vision Search
-USE_RANDOM = True  # False: fixed arena | True: random seeds
-N_SEEDS = 5  # Trials to run if USE_RANDOM is True
-SPEED_FACTOR = 3.0  # Swift visual speedup (1.0 = real-time, 2.0 = 2x speed)
-PAUSE_BETWEEN = 2.0  # Seconds to observe final pose between worlds
+from pathlib import Path
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Simulation Pipeline CLI")
+    parser.add_argument(
+        "-s",
+        "--scenario",
+        type=int,
+        required=True,
+        help="Define simulation scenario (1: ideal; 2: noisy)",
+    )
+    parser.add_argument(
+        "-r",
+        "--random",
+        dest="is_random",
+        type=bool,
+        default=True,
+        help="Use random seed or fixed arena. Default: true",
+    )
+    parser.add_argument(
+        "-n",
+        "--n-seeds",
+        type=int,
+        default=5,
+        help="Number of seeds to process if (-r|--random) flag is set. Default: 5",
+    )
+    parser.add_argument(
+        "--speed-factor",
+        type=float,
+        default=3.0,
+        help="Swift visual speedup (1.0 = real-time). Default: 3.0",
+    )
+    parser.add_argument(
+        "-p",
+        "--pause-between",
+        type=float,
+        default=2.0,
+        help="frequency in seconds/time to observe final pose between worlds. Default: 2.0",
+    )
+    return parser.parse_args()
 
 def main():
-    print(f"RUNNING SCENARIO {SCENARIO}: DUAL ROBOT (Open-Loop vs Closed-Loop)")
+    args = parse_args()
+    print(f"RUNNING SCENARIO {args.scenario}: DUAL ROBOT (Open-Loop vs Closed-Loop)")
 
     swift_state = init_swift()
     env = swift_state["env"]
@@ -39,13 +73,13 @@ def main():
     robot_cl_vis = create_robot_marker(env, color=(0.2, 0.5, 0.9, 1.0))
 
     # Parameter configuration based on SCENARIO
-    if SCENARIO == 1:
+    if args.scenario == 1:
         # Ideal conditions: perfect actuation, no offset
         k_v_err_ol, k_w_err_ol = 1.0, 1.0
         k_v_err_cl, k_w_err_cl = 1.0, 1.0
         initial_offset = np.array([0.0, 0.0, 0.0])
         noise_std = 0.0
-    elif SCENARIO == 2:
+    elif args.scenario == 2:
         # Realistic uncertainties: actuation errors, start offset, sensor noise
         k_v_err_ol, k_w_err_ol = (
             0.93,
@@ -62,11 +96,11 @@ def main():
 
     try:
         scenarios = []
-        if not USE_RANDOM:
+        if not args.is_random:
             q_start, obstacles, objective = get_fixed_scenario()
             scenarios.append(("fixed", q_start, obstacles, objective))
         else:
-            for s in range(N_SEEDS):
+            for s in range(args.n_seeds):
                 q_start, obstacles, objective = generate_random_scenario(seed=s)
                 scenarios.append((f"seed_{s}", q_start, obstacles, objective))
 
@@ -92,7 +126,7 @@ def main():
                 obstacles=obstacles,
                 objective=objective,
                 q_start_real=q_start_real,
-                speed_factor=SPEED_FACTOR,
+                speed_factor=args.speed_factor,
                 k_v_err_ol=k_v_err_ol,
                 k_w_err_ol=k_w_err_ol,
                 k_v_err_cl=k_v_err_cl,
@@ -130,10 +164,10 @@ def main():
                 f"Path: {res_cl['path_length']:.2f}m | Final Dist: {res_cl['final_distance']:.4f}m"
             )
 
-            time.sleep(PAUSE_BETWEEN)
+            time.sleep(args.pause_between)
 
         # Batch analysis and plots
-        prefix = f"scenario_{SCENARIO}_" + ("random_batch" if USE_RANDOM else "fixed")
+        prefix = f"scenario_{args.scenario}_" + ("random_batch" if args.is_random else "fixed")
         plot_trajectories_2d(
             batch_results, save_path=f"outputs/figures/{prefix}_trajectories.png"
         )
