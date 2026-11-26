@@ -1,7 +1,11 @@
+# general
+/data/
+/local/
+/results/
 
-docs/*.pdf
-results/plots/*.png
-
+# packages
 __pycache__/
+*.egg-info/
 
+# workspace settings
 .vscode
