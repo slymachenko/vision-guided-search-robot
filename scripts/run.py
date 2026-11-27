@@ -81,14 +81,12 @@ def main():
         noise_std = 0.0
     elif args.scenario == 2:
         # Realistic uncertainties: actuation errors, start offset, sensor noise
-        k_v_err_ol, k_w_err_ol = (
-            0.93,
-            1.08,
-        )  # Open loop suffers wheel drift/miscalibration
-        k_v_err_cl, k_w_err_cl = (
+        # - Open loop suffers wheel drift/miscalibration
+        # - Closed loop has same physical imperfections
+        k_v_err_ol, k_w_err_ol = k_v_err_cl, k_w_err_cl =(
             0.95,
             1.05,
-        )  # Closed loop has same physical imperfections
+        )
         initial_offset = np.array(
             [0.03, -0.02, np.deg2rad(4.0)]
         )  # 3cm x, -2cm y, 4 deg yaw offset
